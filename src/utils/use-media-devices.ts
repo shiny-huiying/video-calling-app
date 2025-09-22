@@ -1,4 +1,4 @@
-import { ref, onUnmounted, useTemplateRef, toRaw } from 'vue'
+import { ref, useTemplateRef, toRaw } from 'vue'
 import { useMediaDevicesStore } from '@/stores/media-devices'
 
 const logEnable = false
@@ -9,6 +9,7 @@ export function useMediaDevices() {
   const mediaDevicesStore = useMediaDevicesStore()
   const localVideoRef = useTemplateRef<HTMLVideoElement>('localVideo')
   const localstream = ref<MediaStream | null>(null)
+  const isCapturing = ref(false)
 
   const logStreamInfo = (stream: MediaStream) => {
     console.log(
@@ -44,34 +45,55 @@ export function useMediaDevices() {
   }
 
   const getMedia = async () => {
-    const mediaStream = (localstream.value = await navigator.mediaDevices.getUserMedia({
-      video: {
-        deviceId: mediaDevicesStore.selectedVideoInput?.deviceId || '',
-        width: 640,
-        height: 360,
-      },
-      audio: {
-        deviceId: mediaDevicesStore.selectedAudioInput?.deviceId || '',
-      },
-    }))
-    if (!videoStatus.value) {
-      mediaStream.getVideoTracks()[0].enabled = false
-    }
-    if (!audioStatus.value) {
-      mediaStream.getAudioTracks()[0].enabled = false
-    }
-    localVideoRef.value!.srcObject = localstream.value
+    if (isCapturing.value) return
+    isCapturing.value = true
+    try {
+      const videoDeviceId = mediaDevicesStore.selectedVideoInput?.deviceId
+      const audioDeviceId = mediaDevicesStore.selectedAudioInput?.deviceId
+      const constraints: MediaStreamConstraints = {
+        video: {
+          deviceId: videoDeviceId ? { exact: videoDeviceId } : undefined,
+          width: 640,
+          height: 360,
+        },
+        audio: {
+          deviceId: audioDeviceId ? { exact: audioDeviceId } : undefined,
+        },
+      }
+      const mediaStream = (localstream.value =
+        await navigator.mediaDevices.getUserMedia(constraints))
+      if (!videoStatus.value) {
+        mediaStream.getVideoTracks().forEach((t) => (t.enabled = false))
+      }
+      if (!audioStatus.value) {
+        mediaStream.getAudioTracks().forEach((t) => (t.enabled = false))
+      }
+      if (localVideoRef.value) {
+        localVideoRef.value.srcObject = localstream.value
+      }
 
-    if (logEnable) {
-      logStreamInfo(mediaStream)
-      logInputDevices()
+      if (logEnable) {
+        logStreamInfo(mediaStream)
+        logInputDevices()
+      }
+    } catch (err) {
+      console.error('[getUserMedia] error:', err)
+      // Re-throw so caller can handle (toast/log)
+      throw err
+    } finally {
+      isCapturing.value = false
     }
   }
 
   const stopMedia = () => {
-    if (localstream.value) {
-      localstream.value.getTracks().forEach((track) => track.stop())
-      localVideoRef.value!.srcObject = null
+    try {
+      if (localstream.value) {
+        localstream.value.getTracks().forEach((track) => track.stop())
+      }
+      if (localVideoRef.value) {
+        localVideoRef.value.srcObject = null
+      }
+    } finally {
       localstream.value = null
     }
   }
@@ -92,10 +114,6 @@ export function useMediaDevices() {
     }
   }
 
-  onUnmounted(() => {
-    stopMedia()
-  })
-
   return {
     localstream,
     getMedia,
@@ -105,5 +123,6 @@ export function useMediaDevices() {
     toggleAudioStatus,
     audioStatus,
     localVideoRef,
+    isCapturing,
   }
 }

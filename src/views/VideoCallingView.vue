@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, useTemplateRef } from 'vue'
+import { ref, useTemplateRef, onUnmounted } from 'vue'
 import { v4 as uuid } from 'uuid'
 import { io, Socket } from 'socket.io-client'
 import { useMediaDevicesStore } from '@/stores/media-devices'
@@ -10,12 +10,14 @@ const mediaDevicesStore = useMediaDevicesStore()
 const { logList, log } = useLog()
 const {
   localstream,
+  localVideoRef,
   getMedia,
   stopMedia,
   toggleVideoStatus,
   videoStatus,
   toggleAudioStatus,
   audioStatus,
+  isCapturing,
 } = useMediaDevices()
 
 // types
@@ -34,7 +36,7 @@ const getShortUserId = (userId: string) => {
 let peerConnect: RTCPeerConnection | null = null
 let socket: Socket | null = null
 
-// const peerConnectOptions = {
+// const peerConnectOptions: RTCConfiguration = {
 //   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 //   iceCandidatePoolSize: 2,
 //   iceTransportPolicy: 'relay' as const,
@@ -47,6 +49,8 @@ const isJoinedRoom = ref(false)
 const userList = ref<Set<string>>(new Set())
 const remoteVideo = useTemplateRef<HTMLVideoElement | null>('remoteVideo')
 const videoList = useTemplateRef<HTMLElement | null>('videoList')
+let localVideoSender: RTCRtpSender | null = null
+let localAudioSender: RTCRtpSender | null = null
 
 const joinRoom = () => {
   if (!roomId.value || isJoinedRoom.value) {
@@ -154,13 +158,13 @@ const handleSignal = async (roomId: string, data: ISignalData) => {
   }
 }
 const handleOfferData = async (sdp: RTCSessionDescriptionInit) => {
-  const peerConnect = createPeerConnection()
-  await peerConnect.setRemoteDescription(sdp)
+  peerConnect = createPeerConnection()
+  await peerConnect!.setRemoteDescription(sdp)
   log('[pc]setRemoteDescription()')
-  const answer = await peerConnect.createAnswer()
+  const answer = await peerConnect!.createAnswer()
   log('[pc]createAnswer()')
   console.log('[my answer sdp]', answer)
-  await peerConnect.setLocalDescription(answer)
+  await peerConnect!.setLocalDescription(answer)
   log('[pc]setLocalDescription()')
   socket!.emit('signal', roomId.value, {
     type: 'answer',
@@ -190,7 +194,9 @@ const addTracks = (pc: RTCPeerConnection) => {
     return
   }
   localstream.value.getTracks().forEach((track) => {
-    pc.addTrack(track, localstream.value!)
+    const sender = pc.addTrack(track, localstream.value!)
+    if (track.kind === 'video') localVideoSender = sender
+    if (track.kind === 'audio') localAudioSender = sender
     log('[pc]addTrack(), kind:', track.kind)
   })
 }
@@ -240,8 +246,22 @@ const createPeerConnection = () => {
         const audio = document.createElement('audio')
         audio.srcObject = ev.streams[0]
         audio.autoplay = true
+        audio.hidden = true
         audio.setAttribute('data-trackid', ev.track.id)
         videoList.value.appendChild(audio)
+
+        const removeIfMatches = (trackId: string) => {
+          const container = videoList.value!
+          const el = container.querySelector(`[data-trackid="${trackId}"]`)
+          if (el && el.parentElement) {
+            el.parentElement.removeChild(el)
+          }
+        }
+
+        ev.track.addEventListener('ended', () => removeIfMatches(ev.track.id))
+        ev.streams[0].addEventListener('removetrack', (e: MediaStreamTrackEvent) => {
+          if (e.track.id === ev.track.id) removeIfMatches(ev.track.id)
+        })
       }
     }
   })
@@ -249,7 +269,7 @@ const createPeerConnection = () => {
 }
 
 const createOffer = async () => {
-  if (!localstream) {
+  if (!localstream.value) {
     log('[ERROR]offer 创建失败! 没有 localstream!')
     return
   }
@@ -274,11 +294,12 @@ const publishStream = async () => {
     log('房间内少于2人，无法推流')
     return
   }
-  for (const receiverId of userList.value) {
-    if (receiverId === myUserId.value) continue
-    createPeerConnection()
-    await createOffer()
+  if (peerConnect) {
+    log('[WARN]已有推流连接，跳过重复创建')
+    return
   }
+  createPeerConnection()
+  await createOffer()
 }
 const stopPublishStream = () => {
   if (!peerConnect) {
@@ -307,6 +328,93 @@ const clearRemoteVideos = () => {
     remoteVideo.value.srcObject = null
   }
 }
+
+// Seamless device switching via replaceTrack
+const switchVideoDevice = async (deviceId: string) => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: deviceId }, width: 640, height: 360 },
+      audio: false,
+    })
+    const newTrack = stream.getVideoTracks()[0]
+    const oldTrack = localstream.value?.getVideoTracks()[0]
+
+    if (localVideoSender) {
+      await localVideoSender.replaceTrack(newTrack)
+    }
+
+    if (localstream.value) {
+      if (oldTrack) {
+        localstream.value.removeTrack(oldTrack)
+        oldTrack.stop()
+      }
+      localstream.value.addTrack(newTrack)
+    }
+
+    if (localVideoRef.value && localstream.value) {
+      localVideoRef.value.srcObject = localstream.value
+    }
+  } catch (err) {
+    log('[ERROR]切换视频设备失败', (err as Error).message)
+  }
+}
+
+const switchAudioDevice = async (deviceId: string) => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: false,
+      audio: { deviceId: { exact: deviceId } },
+    })
+    const newTrack = stream.getAudioTracks()[0]
+    const oldTrack = localstream.value?.getAudioTracks()[0]
+
+    if (localAudioSender) {
+      await localAudioSender.replaceTrack(newTrack)
+    }
+
+    if (localstream.value) {
+      if (oldTrack) {
+        localstream.value.removeTrack(oldTrack)
+        oldTrack.stop()
+      }
+      localstream.value.addTrack(newTrack)
+    }
+  } catch (err) {
+    log('[ERROR]切换音频设备失败', (err as Error).message)
+  }
+}
+
+const onVideoInputChange = (e: Event) => {
+  const target = e.target as HTMLSelectElement
+  const deviceId = target?.value
+  if (deviceId) {
+    mediaDevicesStore.selectVideoInput(deviceId)
+    if (localstream.value) {
+      switchVideoDevice(target.value)
+    }
+  }
+}
+const onAudioInputChange = (e: Event) => {
+  const target = e.target as HTMLSelectElement
+  const deviceId = target?.value
+  if (deviceId) {
+    mediaDevicesStore.selectAudioInput(deviceId)
+    if (localstream.value) {
+      switchAudioDevice(deviceId)
+    }
+  }
+}
+
+onUnmounted(() => {
+  try {
+    socket?.emit('signal', roomId.value, { type: 'hangup' })
+  } catch {}
+  closePeerConnection()
+  clearRemoteVideos()
+  stopMedia()
+  socket?.disconnect()
+  socket = null
+})
 </script>
 
 <template>
@@ -328,7 +436,7 @@ const clearRemoteVideos = () => {
         <fieldset>
           <legend>选择推流设备</legend>
 
-          <select name="videoInput" id="videoInput">
+          <select name="videoInput" id="videoInput" @change="onVideoInputChange">
             <option
               v-for="val in mediaDevicesStore.videoInputs"
               :value="val.deviceId"
@@ -339,7 +447,7 @@ const clearRemoteVideos = () => {
           </select>
           <br />
 
-          <select name="audioInput" id="audioInput">
+          <select name="audioInput" id="audioInput" @change="onAudioInputChange">
             <option
               v-for="val in mediaDevicesStore.audioInputs"
               :value="val.deviceId"
@@ -361,7 +469,7 @@ const clearRemoteVideos = () => {
         </fieldset>
         <fieldset>
           <legend>采集音视频</legend>
-          <button @click="getMedia" :disabled="!!localstream">开始</button>
+          <button @click="getMedia" :disabled="!!localstream || isCapturing">开始</button>
           <button @click="stopMedia" :disabled="!localstream">停止</button>
         </fieldset>
         <fieldset>

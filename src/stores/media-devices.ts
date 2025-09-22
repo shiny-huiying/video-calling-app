@@ -41,12 +41,14 @@ export const useMediaDevicesStore = defineStore('mediaDevices', () => {
     }
   }
 
-  function selectAudioInput(device: MediaDeviceInfo) {
-    selectedAudioInput.value = device
+  function selectAudioInput(deviceId: string) {
+    const device = audioInputs.value.find((info: MediaDeviceInfo) => info.deviceId === deviceId)
+    selectedAudioInput.value = device || null
   }
 
-  function selectVideoInput(device: MediaDeviceInfo) {
-    selectedVideoInput.value = device
+  function selectVideoInput(deviceId: string) {
+    const device = videoInputs.value.find((info: MediaDeviceInfo) => info.deviceId === deviceId)
+    selectedVideoInput.value = device || null
   }
 
   // 4. 必须返回需要暴露给外部的 state, getters 和 actions
