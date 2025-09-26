@@ -41,12 +41,12 @@ export const useMediaDevicesStore = defineStore('mediaDevices', () => {
     }
   }
 
-  function selectAudioInput(deviceId: string) {
+  function switchAudioInput(deviceId: string) {
     const device = audioInputs.value.find((info: MediaDeviceInfo) => info.deviceId === deviceId)
     selectedAudioInput.value = device || null
   }
 
-  function selectVideoInput(deviceId: string) {
+  function switchVideoInput(deviceId: string) {
     const device = videoInputs.value.find((info: MediaDeviceInfo) => info.deviceId === deviceId)
     selectedVideoInput.value = device || null
   }
@@ -59,7 +59,7 @@ export const useMediaDevicesStore = defineStore('mediaDevices', () => {
     audioInputs,
     videoInputs,
     setMediaDevices,
-    selectAudioInput,
-    selectVideoInput,
+    switchAudioInput,
+    switchVideoInput,
   }
 })

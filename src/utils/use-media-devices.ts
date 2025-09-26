@@ -1,15 +1,14 @@
-import { ref, useTemplateRef, toRaw } from 'vue'
+import { ref, toRaw } from 'vue'
 import { useMediaDevicesStore } from '@/stores/media-devices'
 
-const logEnable = false
-// 是否默认关闭音频
-const audioEnable = false
+const isCapturing = ref(false)
+const localstream = ref<MediaStream | null>(null)
+const videoStatus = ref(true)
+// 默认关闭音频
+const audioStatus = ref(false)
 
 export function useMediaDevices() {
   const mediaDevicesStore = useMediaDevicesStore()
-  const localVideoRef = useTemplateRef<HTMLVideoElement>('localVideo')
-  const localstream = ref<MediaStream | null>(null)
-  const isCapturing = ref(false)
 
   const logStreamInfo = (stream: MediaStream) => {
     console.log(
@@ -44,6 +43,20 @@ export function useMediaDevices() {
     console.log('video inputs:', toRaw(mediaDevicesStore.videoInputs))
   }
 
+  const toggleVideoStatus = () => {
+    videoStatus.value = !videoStatus.value
+    if (localstream.value) {
+      localstream.value.getVideoTracks().forEach((track) => (track.enabled = videoStatus.value))
+    }
+  }
+
+  const toggleAudioStatus = () => {
+    audioStatus.value = !audioStatus.value
+    if (localstream.value) {
+      localstream.value.getAudioTracks().forEach((track) => (track.enabled = audioStatus.value))
+    }
+  }
+
   const getMedia = async () => {
     if (isCapturing.value) return
     isCapturing.value = true
@@ -68,14 +81,9 @@ export function useMediaDevices() {
       if (!audioStatus.value) {
         mediaStream.getAudioTracks().forEach((t) => (t.enabled = false))
       }
-      if (localVideoRef.value) {
-        localVideoRef.value.srcObject = localstream.value
-      }
 
-      if (logEnable) {
-        logStreamInfo(mediaStream)
-        logInputDevices()
-      }
+      logStreamInfo(mediaStream)
+      logInputDevices()
     } catch (err) {
       console.error('[getUserMedia] error:', err)
       // Re-throw so caller can handle (toast/log)
@@ -90,39 +98,19 @@ export function useMediaDevices() {
       if (localstream.value) {
         localstream.value.getTracks().forEach((track) => track.stop())
       }
-      if (localVideoRef.value) {
-        localVideoRef.value.srcObject = null
-      }
     } finally {
       localstream.value = null
     }
   }
 
-  const videoStatus = ref(true)
-  const toggleVideoStatus = () => {
-    videoStatus.value = !videoStatus.value
-    if (localstream.value) {
-      localstream.value.getVideoTracks().forEach((track) => (track.enabled = videoStatus.value))
-    }
-  }
-
-  const audioStatus = ref(audioEnable)
-  const toggleAudioStatus = () => {
-    audioStatus.value = !audioStatus.value
-    if (localstream.value) {
-      localstream.value.getAudioTracks().forEach((track) => (track.enabled = audioStatus.value))
-    }
-  }
-
   return {
+    isCapturing,
     localstream,
+    videoStatus,
+    audioStatus,
     getMedia,
     stopMedia,
     toggleVideoStatus,
-    videoStatus,
     toggleAudioStatus,
-    audioStatus,
-    localVideoRef,
-    isCapturing,
   }
 }

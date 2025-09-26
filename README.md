@@ -8,6 +8,24 @@ A one-to-one video calling application built with WebRTC and JavaScript.
 
 ![client-A](images/client-A.jpg)
 
+## 功能
+
+- 局域网内音视频通话
+  - 一对一音视频通话
+  - 多对多音视频通话
+- 支持推流中动态切换推流设备（摄像头/麦克风）
+- 支持推流中切换音视频的开关状态
+
+todo：
+
+- 本地录制
+- 多视频源
+  - 屏幕共享
+  - 共享本地多媒体文件
+- 断网重连
+- 显示音量
+- 统计数据并显示
+
 ## Recommended IDE Setup
 
 [VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).

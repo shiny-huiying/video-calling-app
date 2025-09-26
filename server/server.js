@@ -6,7 +6,6 @@ const app = express()
 const httpServer = createServer(app)
 
 const PORT = process.env.PORT || 3000;
-const USERCOUNT = 2;
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -65,12 +64,6 @@ io.on('connection', (socket) => {
     const userCount = io.sockets.adapter.rooms.get(roomId).size;
     console.log(`客户端(${socket.id},userId:${getShortUserId(userId)})【已加入】房间:${roomId}，当前房间用户数:${userCount}`);
 
-    if (userCount > USERCOUNT) {
-      socket.emit('full', { roomId });
-      socket.leave(roomId)
-      console.log(`房间 ${roomId} 已满，客户端(${socket.id},userId:${getShortUserId(userId)})【被拒绝加入】。`);
-      return;
-    }
     const userList = Array.from(clients.keys())
     socket.emit('joined', { roomId, userList });
     socket.to(roomId).emit('user-joined', { roomId, userId })
